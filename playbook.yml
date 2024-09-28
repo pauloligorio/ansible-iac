@@ -1,0 +1,179 @@
+---
+- name: Provisionando e configurando containers Docker
+  hosts: localhost
+  become: true
+  vars:
+    mysql_root_password: "senha_secreta"
+    mysql_database: "meu_banco"
+    mysql_user: "meu_usuario"
+    mysql_password: "minha_senha"
+    java_version: "11"
+    ubuntu_packages:
+      - build-essential
+      - curl
+      - git
+      - vim
+      - python3
+      - python3-pip
+
+  tasks:
+    - name: Garantindo que o Docker esta instalado
+      apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+
+    - name: Garantindo que o serviço Docker esta rodando
+      service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Criando volume para o MySQL
+      docker_volume:
+        name: mysql_data
+
+    - name: Criando volume para o Java
+      docker_volume:
+        name: java_data
+
+    - name: Criando volume para o Ubuntu
+      docker_volume:
+        name: ubuntu_data
+
+    - name: Baixando a imagem do MySQL
+      docker_image:
+        name: mysql
+        tag: latest
+        source: pull
+
+    - name: Criando diretorio para configuracao do MySQL
+      file:
+        path: /etc/mysql_custom
+        state: directory
+
+    - name: Criando arquivo de configuração personalizado do MySQL
+      copy:
+        dest: /etc/mysql_custom/my.cnf
+        content: |
+          [mysqld]
+          max_connections = 100
+          innodb_buffer_pool_size = 256M
+
+
+    - name: Criando container MySQL com volume
+      docker_container:
+        name: mysql-container
+        image: mysql
+        env:
+          MYSQL_ROOT_PASSWORD: "{{ mysql_root_password }}"
+          MYSQL_DATABASE: "{{ mysql_database }}"
+          MYSQL_USER: "{{ mysql_user }}"
+          MYSQL_PASSWORD: "{{ mysql_password }}"
+        volumes:
+          - mysql_data:/var/lib/mysql
+          - /etc/mysql_custom/my.cnf:/etc/mysql/conf.d/custom.cnf:ro
+        ports:
+          - "3306:3306"
+
+    - name: Baixando a imagem do Java
+      docker_image:
+        name: openjdk
+        tag: "{{java_version}}-jdk"
+        source: pull
+
+    - name: Criando Dockerfile para Java com dependencias adicionais 
+      copy:
+        dest: /tmp/Dockerfile-java
+        content: |
+          FROM openjdk:{{java_version}}-jdk
+          RUN apt-get update && apt-get install -y maven gradle
+
+    - name: Construindo imagem Java personalizado
+      docker_image:
+        name: custom-java
+        build:
+          path: /tmp
+          dockerfile: /tmp/Dockerfile-java
+        source: build
+
+
+    - name: Criando container Java personalizado
+      docker_container:
+        name: java-container
+        image: custom-java
+        volumes:
+          - java_data:/app
+        command: tail -f /dev/null
+
+    - name: Baixando a imagem do Ubuntu
+      docker_image:
+        name: ubuntu
+        tag: latest
+        source: pull
+
+    - name: Criando container Ubuntu
+      docker_container:
+        name: ubuntu-container
+        image: ubuntu
+        command: tail -f /dev/null
+        volumes:
+          - ubuntu_data:/data
+
+    - name: Instalando pacotes no Ubuntu
+      docker_container:
+        name: ubuntu-container
+        command: >
+          /bin/bash -c "apt-get update && 
+          apt-get install -y {{ ubuntu_packages | join(' ') }} && 
+          apt-get clean"
+
+    - name: Verificando se o container MySQL esta rodando
+      shell: docker ps | grep mysql-container
+      register: mysql_status
+      changed_when: false
+
+    - name: Validando que o MySQL esta rodando
+      debug:
+        msg: "MySQL esta funcionando corretamente"
+      when: mysql_status.rc == 0
+
+    - name: Verificando se o container Java esta rodando
+      shell: docker ps | grep java-container
+      register: java_status
+      changed_when: false
+
+    - name: Validando que o Java esta rodando
+      debug:
+        msg: "Java esta funcionando corretamente"
+      when: java_status.rc == 0
+
+    - name: Verificando se o container Ubuntu esta rodando
+      shell: docker ps | grep ubuntu-container
+      register: ubuntu_status
+      changed_when: false
+
+    - name: Validando que o Ubuntu esta rodando
+      debug:
+        msg: "Ubuntu esta funcionando corretamente"
+      when: ubuntu_status.rc == 0
+
+    - name: Verificando a versao do Java no container
+      docker_container:
+        name: java-container
+        command: java -version
+      register: java_version_output
+
+    - name: Exibindo versao do Java
+      debug:
+        var: java_version_output.stdout_lines
+
+    - name: Verificando pacotes instalados no Ubuntu
+      docker_container:
+        name: ubuntu-container
+        command: dpkg -l
+      register: ubuntu_packages_output
+
+    - name: Exibindo pacotes instalados no Ubuntu
+      debug:
+        var: ubuntu_packages_output.stdout_lines
