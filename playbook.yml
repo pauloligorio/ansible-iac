@@ -60,7 +60,6 @@
           max_connections = 100
           innodb_buffer_pool_size = 256M
 
-
     - name: Criando container MySQL com volume
       docker_container:
         name: mysql-container
@@ -82,7 +81,7 @@
         tag: "{{java_version}}-jdk"
         source: pull
 
-    - name: Criando Dockerfile para Java com dependencias adicionais 
+    - name: Criando Dockerfile para Java com dependencias adicionais
       copy:
         dest: /tmp/Dockerfile-java
         content: |
@@ -96,7 +95,6 @@
           path: /tmp
           dockerfile: /tmp/Dockerfile-java
         source: build
-
 
     - name: Criando container Java personalizado
       docker_container:
